@@ -17,6 +17,24 @@ Le reste du nom peut être quelconque, et les tirets du numéro sont facultatifs
 
 ## Installation
 
+### Option 1 — l'exécutable (rien à installer)
+
+`ExtractionMAC.exe` est autonome : ni Python, ni bibliothèque, ni droits
+administrateur. Le copier où l'on veut et double-cliquer.
+
+Il est reconstruit à chaque modification du code par
+[l'action GitHub « Construire l'exécutable Windows »](../../actions/workflows/build-exe.yml) :
+ouvrir la dernière exécution réussie et télécharger l'artefact
+**ExtractionMAC-windows**. Il contient l'exécutable et son empreinte SHA-256.
+
+> Le premier lancement peut déclencher un avertissement SmartScreen
+> (« Windows a protégé votre ordinateur ») : c'est le comportement normal pour
+> un exécutable non signé. *Informations complémentaires* → *Exécuter quand même*.
+> Certains antivirus signalent aussi à tort les exécutables PyInstaller ; comparer
+> l'empreinte SHA-256 fournie permet de vérifier que le fichier est bien celui produit.
+
+### Option 2 — depuis les sources
+
 Le programme n'utilise que la bibliothèque standard de Python : **aucun
 `pip install` n'est nécessaire**.
 
@@ -24,9 +42,8 @@ Le programme n'utilise que la bibliothèque standard de Python : **aucun
    en cochant **« Add python.exe to PATH »** et **« tcl/tk and IDLE »**.
 2. Double-cliquer sur `Lancer_ExtractionMac.bat`.
 
-Pour déployer sur des postes sans Python, lancer une fois `Creer_executable.bat`
-sur un poste équipé : il produit `dist\ExtractionMAC.exe`, autonome et
-distribuable tel quel.
+`Creer_executable.bat` refabrique l'exécutable localement, sur un poste Windows
+disposant de Python.
 
 ## Utilisation
 
