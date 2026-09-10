@@ -1,0 +1,117 @@
+name: Construire l'executable Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      publier_release:
+        description: "Publier aussi une release telechargeable publiquement"
+        type: boolean
+        default: false
+  push:
+    branches: ["**"]
+    paths:
+      - "extraction_mac/**"
+      - "lancer.py"
+      - ".github/workflows/build-exe.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verifier que Tkinter est disponible
+        run: python -c "import tkinter; print('Tk', tkinter.TkVersion)"
+
+      - name: Lancer les tests
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: Installer PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Preparer les metadonnees de version
+        shell: python
+        run: |
+          import re, pathlib
+          version = re.search(
+              r'__version__ = "([^"]+)"',
+              pathlib.Path("extraction_mac/__init__.py").read_text(encoding="utf-8")).group(1)
+          quadruplet = tuple((list(int(n) for n in version.split(".")) + [0, 0, 0, 0])[:4])
+          pathlib.Path("version_info.txt").write_text(
+              "VSVersionInfo(\n"
+              "  ffi=FixedFileInfo(filevers=%r, prodvers=%r, mask=0x3f, flags=0x0,\n"
+              "                    OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),\n"
+              "  kids=[StringFileInfo([StringTable('040C04B0', [\n"
+              "      StringStruct('FileDescription', 'Extraction MAC - Word vers Excel'),\n"
+              "      StringStruct('FileVersion', '%s'),\n"
+              "      StringStruct('InternalName', 'ExtractionMAC'),\n"
+              "      StringStruct('OriginalFilename', 'ExtractionMAC.exe'),\n"
+              "      StringStruct('ProductName', 'Extraction MAC'),\n"
+              "      StringStruct('ProductVersion', '%s')])]),\n"
+              "    VarFileInfo([VarStruct('Translation', [0x040C, 1200])])]\n"
+              ")\n" % (quadruplet, quadruplet, version, version),
+              encoding="utf-8")
+          print(open("version_info.txt", encoding="utf-8").read())
+
+      - name: Construire l'executable
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed --noupx
+          --name ExtractionMAC
+          --version-file version_info.txt
+          --collect-submodules extraction_mac
+          lancer.py
+
+      - name: Verifier que l'executable a bien ete produit
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist\ExtractionMAC.exe)) { throw "executable absent" }
+          $taille = (Get-Item dist\ExtractionMAC.exe).Length
+          Write-Host "Taille : $([math]::Round($taille/1MB,1)) Mo"
+          if ($taille -lt 5MB) { throw "executable anormalement petit : $taille octets" }
+
+      # Le runner Windows n'a pas toujours de session graphique : cette
+      # verification informe sans bloquer la production de l'executable.
+      - name: Essayer d'ouvrir l'interface
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\ExtractionMAC.exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { throw "l'executable s'est arrete tout seul (code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "L'interface s'est ouverte et est restee active 10 s."
+
+      - name: Calculer l'empreinte SHA-256
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash dist\ExtractionMAC.exe -Algorithm SHA256).Hash
+          Write-Host "SHA-256 : $h"
+          "$h  ExtractionMAC.exe" | Out-File -Encoding ascii dist\ExtractionMAC.exe.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExtractionMAC-windows
+          path: |
+            dist/ExtractionMAC.exe
+            dist/ExtractionMAC.exe.sha256
+          retention-days: 90
+
+      - name: Publier une release
+        if: inputs.publier_release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Select-String -Path extraction_mac/__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          $tag = "v$version-$($env:GITHUB_RUN_NUMBER)"
+          gh release create $tag dist/ExtractionMAC.exe dist/ExtractionMAC.exe.sha256 `
+            --title "Extraction MAC $version" `
+            --notes "Executable Windows autonome. Aucune installation de Python necessaire."
