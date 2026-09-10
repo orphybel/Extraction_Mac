@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+*.xlsx
+*.xlsm
+*.doc
+*.docx
+!tests/**/*.xlsx
+.venv/
