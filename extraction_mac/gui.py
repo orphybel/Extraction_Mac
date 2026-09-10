@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import queue
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -45,6 +46,7 @@ class Application(ttk.Frame):
         self._appliquer_profil(self.profils.get(dernier, config.profil_vide()))
         self.var_profil.set(dernier)
         self._rafraichir_profils()
+        self.var_etat.set("Configuration : %s" % config.chemin_config())
         self.racine.after(100, self._vider_file)
         self.racine.protocol("WM_DELETE_WINDOW", self._fermer)
 
@@ -192,13 +194,13 @@ class Application(ttk.Frame):
         profil.update(self._profil_courant())
         self.profils[nom] = config.normaliser_profil(profil)
         try:
-            config.enregistrer(self.profils, nom)
+            destination = config.enregistrer(self.profils, nom)
         except OSError as erreur:
             messagebox.showerror("Profil", "Enregistrement impossible :\n%s" % erreur,
                                  parent=self.racine)
             return
         self._rafraichir_profils()
-        self.var_etat.set("Profil « %s » enregistré dans %s" % (nom, config.chemin_config()))
+        self.var_etat.set("Profil « %s » enregistré dans %s" % (nom, destination))
 
     def _supprimer_profil(self):
         nom = self.var_profil.get().strip()
@@ -391,6 +393,45 @@ class Application(ttk.Frame):
                 return
             self.arret.set()
         self.racine.destroy()
+
+
+NOM_DIAGNOSTIC = "ExtractionMAC-diagnostic.txt"
+
+
+def diagnostic():
+    """Ecrit les emplacements resolus dans un fichier, a cote de la configuration.
+
+    Sert au support (« ou sont passes mes profils ? ») et permet de verifier,
+    sur l'executable reellement produit, que la configuration est bien ecrite
+    a cote de lui.
+    """
+    lignes = [
+        "Extraction MAC %s" % __version__,
+        "fige par PyInstaller : %s" % bool(getattr(sys, "frozen", False)),
+        "executable           : %s" % sys.executable,
+        "dossier du programme : %s" % config.dossier_programme(),
+        "dossier de repli     : %s" % config.dossier_repli(),
+        "fichier de config    : %s" % config.chemin_config(),
+    ]
+    texte = "\n".join(lignes)
+    cible = os.path.join(os.path.dirname(config.chemin_config()), NOM_DIAGNOSTIC)
+    try:
+        with open(cible, "w", encoding="utf-8") as fichier:
+            fichier.write(texte + "\n")
+    except OSError as erreur:
+        texte += "\n(diagnostic non enregistre : %s)" % erreur
+    if sys.stdout is not None:                     # absent en mode fenetre
+        print(texte)
+    return texte
+
+
+def principal(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if any(argument.lstrip("-/").lower() == "diagnostic" for argument in argv):
+        diagnostic()
+        return 0
+    lancer()
+    return 0
 
 
 def lancer():

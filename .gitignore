@@ -9,3 +9,5 @@ dist/
 *.docx
 !tests/**/*.xlsx
 .venv/
+ExtractionMAC-config.json
+ExtractionMAC-diagnostic.txt

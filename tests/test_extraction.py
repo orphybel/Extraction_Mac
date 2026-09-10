@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 import xml.dom.minidom
@@ -283,10 +285,16 @@ class TestConfiguration(unittest.TestCase):
     def setUp(self):
         self.dossier = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dossier, True)
+        self.repli = os.path.join(self.dossier, "repli")
+        self.programme = os.path.join(self.dossier, "programme")
+        os.makedirs(self.programme)
         self._ancien = dict(os.environ)
-        os.environ["APPDATA"] = self.dossier
-        os.environ["XDG_CONFIG_HOME"] = self.dossier
+        os.environ["APPDATA"] = self.repli
+        os.environ["XDG_CONFIG_HOME"] = self.repli
         self.addCleanup(lambda: (os.environ.clear(), os.environ.update(self._ancien)))
+        self._vrai_dossier_programme = config.dossier_programme
+        config.dossier_programme = lambda: self.programme
+        self.addCleanup(setattr, config, "dossier_programme", self._vrai_dossier_programme)
 
     def test_aller_retour(self):
         profil = config.profil_vide()
@@ -309,6 +317,51 @@ class TestConfiguration(unittest.TestCase):
         self.assertEqual(profils["partiel"]["cellule"], "B12")
         self.assertEqual(profils["partiel"]["separateur_mac"], ":")
         self.assertEqual(profils["partiel"]["groupes_numero"], [6, 7, 5])
+
+    def test_ecrit_a_cote_du_programme(self):
+        destination = config.enregistrer({"MF19": config.profil_vide()}, "MF19")
+        attendu = os.path.join(self.programme, config.NOM_FICHIER)
+        self.assertEqual(destination, attendu)
+        self.assertTrue(os.path.isfile(attendu))
+        self.assertFalse(os.path.exists(os.path.join(self.repli, config.NOM_FICHIER)))
+
+    def test_repli_quand_le_dossier_du_programme_est_inaccessible(self):
+        # un chemin situe « sous » un fichier ordinaire ne peut jamais etre cree,
+        # y compris pour l'administrateur : cela simule un dossier non inscriptible.
+        bloqueur = os.path.join(self.dossier, "fichier.txt")
+        with open(bloqueur, "w", encoding="utf-8") as fichier:
+            fichier.write("x")
+        config.dossier_programme = lambda: os.path.join(bloqueur, "sous-dossier")
+
+        destination = config.enregistrer({"MF19": config.profil_vide()}, "MF19")
+        self.assertEqual(destination, os.path.join(config.dossier_repli(), config.NOM_FICHIER))
+        self.assertTrue(os.path.isfile(destination))
+        profils, dernier = config.charger()
+        self.assertEqual(dernier, "MF19")
+
+    def test_le_fichier_a_cote_du_programme_est_prioritaire(self):
+        os.makedirs(config.dossier_repli(), exist_ok=True)
+        for dossier, cellule in ((config.dossier_repli(), "Z99"), (self.programme, "F27")):
+            with open(os.path.join(dossier, config.NOM_FICHIER), "w", encoding="utf-8") as fichier:
+                json.dump({"profils": {"MF19": {"cellule": cellule}},
+                           "dernier_profil": "MF19"}, fichier)
+        profils, _ = config.charger()
+        self.assertEqual(profils["MF19"]["cellule"], "F27")
+
+    def test_dossier_programme_suit_l_executable_si_fige(self):
+        config.dossier_programme = self._vrai_dossier_programme
+        faux_exe = os.path.join(self.dossier, "ailleurs", "ExtractionMAC.exe")
+        os.makedirs(os.path.dirname(faux_exe))
+        anciens = getattr(sys, "frozen", None), sys.executable
+        sys.frozen, sys.executable = True, faux_exe
+        try:
+            self.assertEqual(config.dossier_programme(), os.path.dirname(faux_exe))
+        finally:
+            sys.executable = anciens[1]
+            if anciens[0] is None:
+                del sys.frozen
+            else:
+                sys.frozen = anciens[0]
 
 
 if __name__ == "__main__":

@@ -77,6 +77,43 @@ jobs:
           Write-Host "Taille : $([math]::Round($taille/1MB,1)) Mo"
           if ($taille -lt 5MB) { throw "executable anormalement petit : $taille octets" }
 
+      - name: Calculer l'empreinte SHA-256
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash dist\ExtractionMAC.exe -Algorithm SHA256).Hash
+          Write-Host "SHA-256 : $h"
+          "$h  ExtractionMAC.exe" | Out-File -Encoding ascii dist\ExtractionMAC.exe.sha256
+
+      # Depose avant les verifications qui suivent : meme si l'une d'elles
+      # echoue, l'executable reste recuperable pour analyse.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExtractionMAC-windows
+          path: |
+            dist/ExtractionMAC.exe
+            dist/ExtractionMAC.exe.sha256
+          retention-days: 90
+
+      # Verification sur l'executable reellement produit, depuis un dossier
+      # quelconque : la configuration doit se poser a cote de lui.
+      - name: Verifier que la configuration se pose a cote de l'executable
+        shell: pwsh
+        run: |
+          $poste = "D:\poste-de-test"
+          New-Item -ItemType Directory -Path $poste | Out-Null
+          Copy-Item dist\ExtractionMAC.exe $poste
+          Start-Process -FilePath "$poste\ExtractionMAC.exe" -ArgumentList "--diagnostic" -Wait
+          $rapport = Join-Path $poste "ExtractionMAC-diagnostic.txt"
+          if (-not (Test-Path $rapport)) {
+            throw "aucun diagnostic ecrit a cote de l'executable"
+          }
+          Get-Content $rapport
+          $attendu = Join-Path $poste "ExtractionMAC-config.json"
+          if (-not (Select-String -Path $rapport -SimpleMatch -Pattern $attendu)) {
+            throw "la configuration n'est pas prevue a cote de l'executable (attendu : $attendu)"
+          }
+          Write-Host "Confirme : la configuration se pose a cote de l'executable."
+
       # Le runner Windows n'a pas toujours de session graphique : cette
       # verification informe sans bloquer la production de l'executable.
       - name: Essayer d'ouvrir l'interface
@@ -88,21 +125,6 @@ jobs:
           if ($p.HasExited) { throw "l'executable s'est arrete tout seul (code $($p.ExitCode))" }
           Stop-Process -Id $p.Id -Force
           Write-Host "L'interface s'est ouverte et est restee active 10 s."
-
-      - name: Calculer l'empreinte SHA-256
-        shell: pwsh
-        run: |
-          $h = (Get-FileHash dist\ExtractionMAC.exe -Algorithm SHA256).Hash
-          Write-Host "SHA-256 : $h"
-          "$h  ExtractionMAC.exe" | Out-File -Encoding ascii dist\ExtractionMAC.exe.sha256
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ExtractionMAC-windows
-          path: |
-            dist/ExtractionMAC.exe
-            dist/ExtractionMAC.exe.sha256
-          retention-days: 90
 
       - name: Publier une release
         if: inputs.publier_release

@@ -66,7 +66,20 @@ dossier, l'onglet, la cellule et les options sont mémorisés. Au lancement
 suivant, le dernier profil utilisé est rechargé automatiquement ; on peut aussi
 en choisir un autre dans la liste.
 
-Les profils sont stockés dans `%APPDATA%\ExtractionMac\config.json`.
+Les profils sont enregistrés dans **`ExtractionMAC-config.json`, à côté de
+l'exécutable** (ou à la racine du projet si l'on lance les sources). L'outil est
+donc portable : copier le dossier — ou le mettre sur une clé USB — et les profils
+suivent. La barre d'état affiche l'emplacement exact au démarrage.
+
+> **Repli automatique.** Si ce dossier n'est pas accessible en écriture —
+> exécutable posé dans `C:\Program Files`, sur un partage réseau en lecture
+> seule, sur une clé protégée — la configuration bascule vers
+> `%APPDATA%\ExtractionMac\`. Sans ce repli, l'enregistrement échouerait sans
+> raison apparente. À la lecture, le fichier situé à côté de l'exécutable est
+> prioritaire.
+>
+> En cas de doute, `ExtractionMAC.exe --diagnostic` écrit un fichier
+> `ExtractionMAC-diagnostic.txt` indiquant les emplacements retenus.
 
 ### Options
 
@@ -121,11 +134,11 @@ extraction_mac/
 ├── docmac.py    lecture de l'adresse MAC dans le Word (docx, doc binaire, rtf)
 ├── xlsxcell.py  lecture et écriture chirurgicale d'une cellule .xlsx / .xlsm
 ├── runner.py    appariement du dossier et exécution
-├── config.py    profils enregistrés
+├── config.py    profils enregistrés (à côté du programme, repli %APPDATA%)
 └── gui.py       fenêtre Tkinter
 ```
 
-Tests (36 cas, sans aucune donnée client — les fichiers d'essai sont fabriqués
+Tests (40 cas, sans aucune donnée client — les fichiers d'essai sont fabriqués
 à la volée) :
 
 ```
@@ -134,8 +147,8 @@ python -m unittest discover -s tests -t .
 
 ## Réglages avancés
 
-Certains réglages ne sont pas exposés dans la fenêtre mais lisibles depuis
-`%APPDATA%\ExtractionMac\config.json`, par profil :
+Certains réglages ne sont pas exposés dans la fenêtre mais modifiables dans
+`ExtractionMAC-config.json`, par profil :
 
 | Clé | Défaut | Rôle |
 | --- | --- | --- |
