@@ -253,7 +253,7 @@ boucle commune (lecture de la cellule, `DÉJÀ OK`, protection contre
 l'écrasement, simulation, écriture), et la source n'intervient que par la
 fonction qui fournit la MAC.
 
-Tests (122 cas, sans aucune donnée client, sans réseau et sans appareil — les
+Tests (136 cas, sans aucune donnée client, sans réseau et sans appareil — les
 fichiers d'essai sont fabriqués à la volée) :
 
 ```
@@ -265,6 +265,19 @@ python -m unittest discover -s tests -t .
 | `test_extraction.py` | le comportement d'origine : lecture du Word, écriture chirurgicale, appairage, profils |
 | `test_banc.py` | table ARP, composition du numéro, machine à états, liste CSV, simulateur |
 | `test_source_releve.py` | la chaîne relevé → cellule Excel relue, et l'égalité des deux sources |
+| `test_interface.py` | la fenêtre elle-même : elle se construit, les onglets travaillent, et aucune méthode ne masque un membre de Tkinter |
+
+Les tests de fenêtre ont besoin d'un affichage ; ils sont sautés proprement s'il
+n'y en a pas. Pour les exécuter sur un poste sans écran :
+
+```
+xvfb-run -a python -m unittest discover -s tests -t .
+```
+
+`ExtractionMAC.exe --autotest` construit la fenêtre, la referme et rend un code
+de sortie : `0` si tout va bien, `1` en cas d'erreur — la trace est alors écrite
+dans `ExtractionMAC-autotest.txt` —, `2` si aucun affichage n'est disponible.
+C'est ce que vérifie l'action GitHub avant de publier l'exécutable.
 
 ## Réglages avancés
 

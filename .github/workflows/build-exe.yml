@@ -18,8 +18,30 @@ permissions:
   contents: write
 
 jobs:
+  # La session graphique du runner Windows n'est pas garantie ; un affichage
+  # virtuel Linux, si. C'est donc ici que les tests de fenetre sont surs de
+  # tourner — et c'est ce qui manquait quand un plantage au demarrage est passe.
+  tests-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer Tkinter et un affichage virtuel
+        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
+
+      - name: Lancer toute la suite, fenetre comprise
+        run: xvfb-run -a python3 -m unittest discover -s tests -t . -v
+
+      # Un test saute ne protege de rien : on exige qu'il ait vraiment tourne.
+      - name: Verifier que les tests de fenetre n'ont pas ete sautes
+        run: |
+          xvfb-run -a python3 -m unittest tests.test_interface.TestFenetre -v 2>&1 | tee sortie.txt
+          grep -qx "OK" sortie.txt || { echo "::error::les tests de fenetre ont ete sautes"; exit 1; }
+
   build:
     runs-on: windows-latest
+    needs: tests-linux
 
     steps:
       - uses: actions/checkout@v4
@@ -119,17 +141,22 @@ jobs:
           }
           Write-Host "Confirme : la configuration se pose a cote de l'executable."
 
-      # Le runner Windows n'a pas toujours de session graphique : cette
-      # verification informe sans bloquer la production de l'executable.
-      - name: Essayer d'ouvrir l'interface
-        continue-on-error: true
+      # L'executable construit reellement sa fenetre et rend un code de sortie.
+      # L'ancien controle regardait seulement si le processus vivait encore apres
+      # 10 s : en mode fenetre, PyInstaller affiche une boite d'erreur et le
+      # processus reste vivant, si bien qu'un plantage au demarrage passait pour
+      # un succes. Il ne le peut plus.
+      - name: Verifier que la fenetre s'ouvre vraiment
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath dist\ExtractionMAC.exe -ArgumentList "--simulation" -PassThru
-          Start-Sleep -Seconds 10
-          if ($p.HasExited) { throw "l'executable s'est arrete tout seul (code $($p.ExitCode))" }
-          Stop-Process -Id $p.Id -Force
-          Write-Host "L'interface s'est ouverte et est restee active 10 s."
+          $p = Start-Process -FilePath dist\ExtractionMAC.exe -ArgumentList "--autotest" -Wait -PassThru
+          $rapport = "dist\ExtractionMAC-autotest.txt"
+          if (Test-Path $rapport) { Get-Content $rapport }
+          switch ($p.ExitCode) {
+            0 { Write-Host "La fenetre s'est construite et refermee sans erreur." }
+            2 { Write-Warning "Pas de session graphique sur ce runner : fenetre non testee ici (le job Linux l'a fait)." }
+            default { throw "l'autotest a echoue (code $($p.ExitCode))" }
+          }
 
       - name: Publier une release
         if: inputs.publier_release

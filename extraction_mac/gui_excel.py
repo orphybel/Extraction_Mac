@@ -42,6 +42,7 @@ class OngletExcel(ttk.Frame):
         self.messages = queue.Queue()
         self.travail = None
         self.arret = threading.Event()
+        self.boucle_file = None
 
         self.var_dossier = application.var_dossier          # partagé avec l'onglet banc
         self.var_csv = application.var_csv                  # partagé avec l'onglet banc
@@ -52,7 +53,7 @@ class OngletExcel(ttk.Frame):
         self.var_source = tk.StringVar(value=SOURCE_WORD)
 
         self._construire()
-        self.after(100, self._vider_file)
+        self.boucle_file = self.after(100, self._vider_file)
 
     # ------------------------------------------------------------------ vue
     def _construire(self):
@@ -252,7 +253,14 @@ class OngletExcel(ttk.Frame):
                      runner.DEJA_OK)
 
     # ------------------------------------------------------------ execution
-    def _options(self, simulation):
+    def _options_runner(self, simulation):
+        """Construit les options de traitement à partir du profil courant.
+
+        Le nom compte : ``_options`` appartient déjà à ``tkinter.Misc``, et
+        ``BaseWidget.__init__`` l'appelle pour convertir les options du widget.
+        Le redéfinir ici faisait appeler cette méthode par tkinter pendant
+        ``super().__init__()``, avant même que ``self.app`` existe.
+        """
         reglages = self.app.reglages()
         options = runner.Options(
             dossier=reglages["dossier"],
@@ -289,7 +297,7 @@ class OngletExcel(ttk.Frame):
             return
         depuis_releve = self.var_source.get() == SOURCE_RELEVE
         try:
-            options = self._options(simulation)
+            options = self._options_runner(simulation)
             releves = self._releves() if depuis_releve else None
         except (ValueError, xlsxcell.ErreurExcel) as erreur:
             messagebox.showerror("Paramètres", str(erreur), parent=self)
@@ -342,6 +350,7 @@ class OngletExcel(ttk.Frame):
         self.messages.put(("fin", bilan))
 
     def _vider_file(self):
+        self.boucle_file = None
         try:
             while True:
                 genre, charge = self.messages.get_nowait()
@@ -357,7 +366,7 @@ class OngletExcel(ttk.Frame):
                     self.app.dire("Échec : %s" % charge)
         except queue.Empty:
             pass
-        self.after(100, self._vider_file)
+        self.boucle_file = self.after(100, self._vider_file)
 
     def _afficher(self, resultat):
         cible = os.path.basename(resultat.excel or resultat.word or "")
@@ -386,7 +395,15 @@ class OngletExcel(ttk.Frame):
         self.bouton_arret.configure(state="disabled" if actif else "normal")
 
     def fermer(self):
-        """Retourne False pour annuler la fermeture de la fenêtre."""
+        """Retourne False pour annuler la fermeture de la fenêtre.
+
+        La boucle de dépouillement est arrêtée : sans cela elle se rappelle une
+        dernière fois sur des widgets déjà détruits, et Tk le signale bruyamment
+        au moment où l'on quitte.
+        """
+        if self.boucle_file is not None:
+            self.after_cancel(self.boucle_file)
+            self.boucle_file = None
         if self.travail and self.travail.is_alive():
             if not messagebox.askyesno("Quitter", "Un traitement est en cours. Quitter quand même ?",
                                        parent=self):

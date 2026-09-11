@@ -25,6 +25,7 @@ from .gui_excel import OngletExcel
 from .simulateur import SimulateurArp
 
 NOM_DIAGNOSTIC = "ExtractionMAC-diagnostic.txt"
+NOM_AUTOTEST = "ExtractionMAC-autotest.txt"
 
 
 class Application(ttk.Frame):
@@ -185,16 +186,61 @@ def diagnostic():
         "dossier de repli     : %s" % config.dossier_repli(),
         "fichier de config    : %s" % config.chemin_config(),
     ]
-    texte = "\n".join(lignes)
-    cible = os.path.join(os.path.dirname(config.chemin_config()), NOM_DIAGNOSTIC)
+    return _ecrire_rapport(NOM_DIAGNOSTIC, "\n".join(lignes))
+
+
+def _ecrire_rapport(nom, texte):
+    """Dépose un rapport à côté de la configuration et le renvoie."""
+    cible = os.path.join(os.path.dirname(config.chemin_config()), nom)
     try:
         with open(cible, "w", encoding="utf-8") as fichier:
             fichier.write(texte + "\n")
     except OSError as erreur:
-        texte += "\n(diagnostic non enregistre : %s)" % erreur
+        texte += "\n(rapport non enregistré : %s)" % erreur
     if sys.stdout is not None:                     # absent en mode fenetre
         print(texte)
     return texte
+
+
+def autotest():
+    """Construit la fenêtre, la rafraîchit, la referme, et rend un code de sortie.
+
+    ========  ======================================================
+    Code      Signification
+    ========  ======================================================
+    ``0``     fenêtre construite et refermée sans erreur
+    ``1``     erreur réelle ; la trace est écrite dans le rapport
+    ``2``     aucun affichage disponible : rien n'a pu être testé
+    ========  ======================================================
+
+    Les exceptions sont rattrapées **ici**. C'est essentiel : en mode fenêtre,
+    PyInstaller afficherait sinon sa propre boîte « Unhandled exception » et le
+    processus resterait vivant — un contrôle d'intégration qui se contente de
+    regarder si le programme tourne encore conclurait alors que tout va bien,
+    alors que rien ne s'est ouvert. C'est exactement ce qui est arrivé.
+    """
+    import traceback
+    try:
+        racine = tk.Tk()
+    except Exception as erreur:                    # noqa: BLE001 - TclError et consorts
+        _ecrire_rapport(NOM_AUTOTEST,
+                        "Extraction MAC %s\nAUCUN AFFICHAGE : %s" % (__version__, erreur))
+        return 2
+    try:
+        racine.withdraw()
+        application = Application(racine, simulation=True)
+        racine.update_idletasks()
+        racine.update()
+        onglets = [application.onglets.tab(index, "text").strip()
+                   for index in range(len(application.onglets.tabs()))]
+        application._fermer()
+    except BaseException:                          # noqa: BLE001 - tout doit être rattrapé
+        _ecrire_rapport(NOM_AUTOTEST, "Extraction MAC %s\nÉCHEC de l'autotest\n\n%s"
+                        % (__version__, traceback.format_exc()))
+        return 1
+    if sys.stdout is not None:
+        print("autotest : fenêtre construite, onglets %s" % onglets)
+    return 0
 
 
 def principal(argv=None):
@@ -203,6 +249,8 @@ def principal(argv=None):
     if "diagnostic" in options:
         diagnostic()
         return 0
+    if "autotest" in options:
+        return autotest()
     lancer(simulation="simulation" in options)
     return 0
 
