@@ -75,7 +75,18 @@ deux onglets — et deux onglets en dessous.
 | --- | --- |
 | **Adresse IP surveillée** | celle que Tftpd32 distribue, par exemple `192.168.0.100`. Le bouton *Tester* dit immédiatement qui répond. |
 | **Préfixe du numéro** | le début du numéro de série, commun à toute la série : `260918-0144215`. Le bouton *Déduire du dossier* le trouve tout seul à partir des noms des fiches Excel. |
-| **Fichier liste (CSV)** | où s'écrit la liste des relevés. |
+| **Fichier liste (CSV)** | le **chemin complet du fichier** où s'écrit la liste — pas un dossier. Il peut être posé n'importe où. |
+
+> **Reprendre une liste déjà commencée.** Il suffit de **renseigner le dossier
+> des fiches** : s'il contient un `MAC-releves.csv`, le champ se remplit tout
+> seul et la liste est rechargée, prête à être continuée. Sinon, *Parcourir…*
+> permet de désigner le fichier où qu'il soit. Le bouton *Recharger la liste*
+> relit ce chemin et **dit toujours ce qu'il a trouvé** — y compris « aucun
+> fichier choisi » ou « fichier introuvable ».
+>
+> Les listes écrites par la version précédente se rechargent telles quelles :
+> le format n'a pas changé. Un dossier saisi par erreur à la place du fichier
+> est toléré : la liste y est cherchée.
 
 Puis, appareil par appareil :
 
@@ -253,7 +264,7 @@ boucle commune (lecture de la cellule, `DÉJÀ OK`, protection contre
 l'écrasement, simulation, écriture), et la source n'intervient que par la
 fonction qui fournit la MAC.
 
-Tests (136 cas, sans aucune donnée client, sans réseau et sans appareil — les
+Tests (144 cas, sans aucune donnée client, sans réseau et sans appareil — les
 fichiers d'essai sont fabriqués à la volée) :
 
 ```

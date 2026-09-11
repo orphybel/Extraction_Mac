@@ -277,6 +277,98 @@ class TestFenetre(unittest.TestCase):
         self.racine.update()
         self.assertTrue(self.boites.erreurs(), "l'absence de liste doit être signalée")
 
+    # ------------------------------------------- rechargement d'une liste
+    def _ecrire_liste_v1(self, dossier=None, nom=None):
+        """Un CSV tel que la version précédente l'écrivait."""
+        chemin = os.path.join(dossier or self.dossier, nom or releve.NOM_DEFAUT)
+        with open(chemin, "w", encoding="utf-8-sig", newline="") as fichier:
+            fichier.write("numero;mac;ip;horodatage\r\n"
+                          "260918-0144215-00092;00:30:D6:4C:6E:05;192.168.0.100;"
+                          "2026-09-10 08:12:03\r\n"
+                          "260918-0144215-00093;0A:1B:2C:3D:4E:5F;192.168.0.100;"
+                          "2026-09-10 08:19:44\r\n")
+        return chemin
+
+    def test_liste_v1_rechargee_pour_etre_continuee(self):
+        """Le cas réel : reprendre une liste commencée avec la version précédente."""
+        chemin = self._ecrire_liste_v1()
+        self.app.var_csv.set(chemin)
+        self.app.onglet_banc._charger_liste(explicite=True)
+        self.racine.update()
+        self.assertEqual(len(self.app.onglet_banc.table.get_children()), 2)
+        self.assertEqual([r.numero for r in self.app.onglet_banc.releves],
+                         ["260918-0144215-00092", "260918-0144215-00093"])
+        self.assertIn("2 relevé", self.app.var_etat.get())
+
+    def test_designer_le_dossier_suffit_a_trouver_la_liste(self):
+        """Ce que l'on attend spontanément : renseigner le dossier des PV."""
+        self._ecrire_liste_v1()
+        self.app.var_csv.set("")
+        self.app.var_dossier.set(self.dossier)
+        self.racine.update()
+        self.assertEqual(self.app.var_csv.get(),
+                         os.path.join(self.dossier, releve.NOM_DEFAUT))
+        self.assertEqual(len(self.app.onglet_banc.releves), 2)
+
+    def test_un_chemin_choisi_a_la_main_n_est_jamais_ecrase(self):
+        autre = self._ecrire_liste_v1(nom="ma-liste.csv")
+        self.app.var_csv.set(autre)
+        self.app.var_dossier.set(self.dossier)
+        self.racine.update()
+        self.assertEqual(self.app.var_csv.get(), autre)
+
+    def test_recharger_sans_fichier_le_dit(self):
+        """Le défaut signalé : le bouton restait muet."""
+        self.app.var_csv.set("")
+        self.app.onglet_banc._charger_liste(explicite=True)
+        self.racine.update()
+        self.assertIn("Aucun fichier de liste choisi", self.app.var_etat.get())
+
+    def test_recharger_un_fichier_absent_le_dit(self):
+        manquant = os.path.join(self.dossier, "pas-la.csv")
+        self.app.var_csv.set(manquant)
+        self.app.onglet_banc._charger_liste(explicite=True)
+        self.racine.update()
+        self.assertIn("introuvable", self.app.var_etat.get())
+
+    def test_un_dossier_saisi_a_la_place_du_fichier_est_toleré(self):
+        self._ecrire_liste_v1()
+        self.app.var_csv.set(self.dossier)
+        self.app.onglet_banc._charger_liste(explicite=True)
+        self.racine.update()
+        self.assertEqual(self.app.var_csv.get(),
+                         os.path.join(self.dossier, releve.NOM_DEFAUT))
+        self.assertEqual(len(self.app.onglet_banc.releves), 2)
+
+    def test_la_relecture_automatique_reste_discrete(self):
+        """Le champ est relu à chaque frappe : pas de message à chaque caractère."""
+        self.app.dire("état de départ")
+        self.app.var_csv.set(os.path.join(self.dossier, "pas-la.csv"))
+        self.racine.update()
+        self.assertEqual(self.app.var_etat.get(), "état de départ")
+
+    def test_une_liste_rechargee_peut_etre_continuee(self):
+        """Reprise : un appareil ajouté s'écrit à la suite, sans perdre les anciens."""
+        chemin = self._ecrire_liste_v1()
+        banc = self.app.onglet_banc
+        self.app.var_csv.set(chemin)
+        banc._charger_liste(explicite=True)
+        banc.var_ip.set("192.168.0.100")
+        banc.var_prefixe.set("260918-0144215")
+        banc._demarrer()
+        for _ in range(4):
+            banc._scruter()
+        self.racine.update()
+        banc.var_numero.set("94")
+        banc._enregistrer_appareil()
+        self.racine.update()
+        banc._arreter()
+
+        relus, _ = releve.charger(chemin)
+        self.assertEqual([r.numero for r in relus],
+                         ["260918-0144215-00092", "260918-0144215-00093",
+                          "260918-0144215-00094"])
+
     def test_fermeture_propre(self):
         self.app.onglet_banc.var_ip.set("192.168.0.100")
         self.app.var_csv.set(os.path.join(self.dossier, "liste.csv"))

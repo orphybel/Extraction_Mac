@@ -19,7 +19,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from . import __version__, config
+from . import __version__, config, releve
 from .gui_banc import OngletBanc
 from .gui_excel import OngletExcel
 from .simulateur import SimulateurArp
@@ -48,6 +48,7 @@ class Application(ttk.Frame):
         self.var_etat = tk.StringVar(value="Prêt.")
 
         self._construire(simulation)
+        self.var_dossier.trace_add("write", self._proposer_liste)
         self._appliquer_profil(self.profils.get(dernier, config.profil_vide()))
         self.var_profil.set(dernier)
         self._rafraichir_profils()
@@ -85,6 +86,19 @@ class Application(ttk.Frame):
         ttk.Label(self, textvariable=self.var_etat, relief="sunken", anchor="w",
                   padding=(6, 3)).grid(row=3, column=0, sticky="ew", pady=(8, 0))
 
+    def _proposer_liste(self, *_):
+        """Désigner le dossier des fiches suffit à trouver la liste qui s'y trouve.
+
+        C'est ce que l'on attend spontanément : on renseigne le dossier des PV,
+        et la liste relevée qui y est posée se charge. Le champ n'est rempli que
+        s'il est vide — un chemin choisi à la main n'est jamais écrasé.
+        """
+        if self.var_csv.get().strip():
+            return
+        dossier = self.var_dossier.get().strip()
+        if os.path.isdir(dossier):
+            self.var_csv.set(os.path.join(dossier, releve.NOM_DEFAUT))
+
     # ------------------------------------------------- services aux onglets
     def dire(self, message):
         self.var_etat.set(message)
@@ -109,8 +123,8 @@ class Application(ttk.Frame):
     def _appliquer_profil(self, profil):
         profil = config.normaliser_profil(profil)
         self._reglages = profil
-        self.var_dossier.set(profil["dossier"])
-        self.var_csv.set(profil["fichier_csv"])
+        self.var_csv.set(profil["fichier_csv"])     # avant le dossier :
+        self.var_dossier.set(profil["dossier"])     # sinon la proposition serait écrasée
         self.onglet_excel.appliquer_reglages(profil)
         self.onglet_banc.appliquer_reglages(profil)
 

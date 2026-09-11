@@ -152,7 +152,8 @@ class OngletBanc(ttk.Frame):
         boutons.columnconfigure(2, weight=1)
         ttk.Button(boutons, text="Supprimer la ligne", command=self._supprimer_ligne,
                    width=20).grid(row=0, column=0)
-        ttk.Button(boutons, text="Recharger la liste", command=self._charger_liste,
+        ttk.Button(boutons, text="Recharger la liste",
+                   command=lambda: self._charger_liste(explicite=True),
                    width=20).grid(row=0, column=1, padx=(8, 0))
         ttk.Button(boutons, text="Écrire ces relevés dans les fiches Excel →",
                    command=self._vers_ecriture, width=42).grid(row=0, column=3, sticky="e")
@@ -184,19 +185,64 @@ class OngletBanc(ttk.Frame):
 
     # ------------------------------------------------------------------ liste
     def _choisir_csv(self):
+        dossier = self.var_dossier.get().strip()
         choix = filedialog.asksaveasfilename(
-            title="Fichier de la liste", defaultextension=".csv",
-            initialfile=releve.NOM_DEFAUT,
+            title="Fichier de la liste — en désigner un existant ou en créer un",
+            defaultextension=".csv",
+            initialdir=dossier if os.path.isdir(dossier) else None,
+            initialfile=os.path.basename(self.var_csv.get().strip()) or releve.NOM_DEFAUT,
             filetypes=[("Fichier CSV", "*.csv"), ("Tous les fichiers", "*.*")],
             confirmoverwrite=False, parent=self)
         if choix:
             self.var_csv.set(choix)
 
-    def _charger_liste(self):
-        self.releves, message = releve.charger(self.var_csv.get().strip())
+    def _charger_liste(self, explicite=False):
+        """Relit le CSV désigné par le champ « Fichier liste ».
+
+        *explicite* vaut True quand l'opérateur a cliqué sur « Recharger la
+        liste » : on lui répond alors toujours, même pour dire qu'il n'y a rien
+        à charger. Un bouton qui ne dit rien passe pour cassé. La relecture
+        automatique, elle, reste discrète : le champ est relu à chaque frappe,
+        et annoncer « introuvable » à chaque caractère tapé n'aiderait personne.
+        """
+        chemin = self.var_csv.get().strip()
+
+        # Tolérance : un dossier saisi à la place du fichier. On y cherche la
+        # liste, plutôt que de renvoyer l'opérateur à ses réglages.
+        if chemin and os.path.isdir(chemin):
+            candidat = os.path.join(chemin, releve.NOM_DEFAUT)
+            if os.path.isfile(candidat):
+                self.var_csv.set(candidat)       # la trace relance le chargement
+                return
+            self.releves = []
+            self._rafraichir_table()
+            if explicite:
+                self.app.dire("%s est un dossier, et il ne contient pas de %s. "
+                              "Indiquer le chemin complet du fichier."
+                              % (chemin, releve.NOM_DEFAUT))
+            return
+
+        if not chemin:
+            self.releves = []
+            self._rafraichir_table()
+            if explicite:
+                self.app.dire("Aucun fichier de liste choisi : cliquer sur « Parcourir… » "
+                              "en face de « Fichier liste (CSV) » et désigner le fichier.")
+            return
+
+        if not os.path.isfile(chemin):
+            self.releves = []
+            self._rafraichir_table()
+            if explicite:
+                self.app.dire("Fichier de liste introuvable : %s" % chemin)
+            return
+
+        self.releves, message = releve.charger(chemin)
         self._rafraichir_table()
         if message:
             self.app.dire(message)
+        elif explicite:
+            self.app.dire("%s ne contient aucun relevé." % os.path.basename(chemin))
 
     def _rafraichir_table(self):
         self.table.delete(*self.table.get_children())
