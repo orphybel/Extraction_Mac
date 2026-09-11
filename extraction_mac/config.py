@@ -27,7 +27,8 @@ import tempfile
 NOM_FICHIER = "ExtractionMAC-config.json"
 
 PROFIL_DEFAUT = {
-    "dossier": "",
+    # --- ecriture dans Excel -------------------------------------------------
+    "dossier": "",                  # partage par les deux onglets
     "feuille": "Constit produit",
     "cellule": "F27",
     "sous_dossiers": False,
@@ -35,10 +36,30 @@ PROFIL_DEFAUT = {
     "separateur_mac": ":",
     "mac_majuscules": True,
     "groupes_numero": [6, 7, 5],
+    "source_mac": "word",           # "word" ou "releve"
+    # --- releve au banc ------------------------------------------------------
+    "ip_surveillee": "192.168.0.100",
+    "prefixe_numero": "",
+    "fichier_csv": "",
+    "vider_cache_arp": True,
+    "intervalle_ms": 1500,
+    "scrutations_stables": 3,
+    "scrutations_absence": 2,
 }
 
 CLES_ENTIERES = ("groupes_numero",)
-CLES_BOOLEENNES = ("sous_dossiers", "ecraser", "mac_majuscules")
+CLES_BOOLEENNES = ("sous_dossiers", "ecraser", "mac_majuscules", "vider_cache_arp")
+CLES_NOMBRES = ("intervalle_ms", "scrutations_stables", "scrutations_absence")
+
+# Bornes des reglages de scrutation. Une valeur aberrante lue sur disque est
+# ramenee dans la plage plutot que de rendre le banc inutilisable.
+BORNES = {
+    "intervalle_ms": (300, 10000),
+    "scrutations_stables": (1, 20),
+    "scrutations_absence": (1, 20),
+}
+
+SOURCES_MAC = ("word", "releve")
 
 
 def dossier_programme():
@@ -114,8 +135,18 @@ def normaliser_profil(brut):
                     groupes = [int(n) for n in valeur]
                 except (TypeError, ValueError):
                     continue
-                if groupes and all(n > 0 for n in groupes):
+                if len(groupes) >= 2 and all(n > 0 for n in groupes):
                     profil[cle] = groupes
+            elif cle in CLES_NOMBRES:
+                try:
+                    nombre = int(valeur)
+                except (TypeError, ValueError):
+                    continue
+                mini, maxi = BORNES[cle]
+                profil[cle] = max(mini, min(maxi, nombre))
+            elif cle == "source_mac":
+                if valeur in SOURCES_MAC:
+                    profil[cle] = valeur
             else:
                 profil[cle] = "" if valeur is None else str(valeur)
     return profil

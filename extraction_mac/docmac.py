@@ -33,7 +33,7 @@ _MAC_BRUT = re.compile(r"(?<![0-9A-Za-z])[0-9A-Fa-f]{12}(?![0-9A-Za-z])")
 
 _LIBELLE_MAC = re.compile(r"\bMAC\b", re.IGNORECASE)
 
-_MAC_INVALIDES = {"000000000000", "FFFFFFFFFFFF"}
+MAC_INVALIDES = {"000000000000", "FFFFFFFFFFFF"}
 
 
 def normaliser(brut, separateur=":", majuscules=True):
@@ -86,7 +86,7 @@ def chercher_mac(texte):
         lisibles = ", ".join(normaliser(v) for v in retenus)
         return None, "plusieurs adresses MAC différentes trouvées : %s" % lisibles
     mac = retenus[0]
-    if mac in _MAC_INVALIDES:
+    if mac in MAC_INVALIDES:
         return None, "adresse MAC invalide dans le document : %s" % normaliser(mac)
     return mac, None
 

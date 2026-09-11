@@ -4,9 +4,9 @@ cd /d "%~dp0"
 
 where py >nul 2>&1
 if %ERRORLEVEL%==0 (
-    py -3 -m extraction_mac
+    py -3 -m extraction_mac %*
 ) else (
-    python -m extraction_mac
+    python -m extraction_mac %*
 )
 
 if %ERRORLEVEL% NEQ 0 (

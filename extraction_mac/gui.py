@@ -1,177 +1,117 @@
-"""Fenetre Tkinter : choix du dossier, de l'onglet et de la cellule, puis report des MAC."""
+"""Fenêtre d'ExtractionMAC : les profils, les deux onglets, la barre d'état.
+
+Le programme fait deux métiers qui se suivent :
+
+* **Relevé au banc** — capter l'adresse MAC de chaque appareil branché ;
+* **Écriture dans Excel** — porter ces adresses dans la bonne cellule de la
+  bonne fiche de test, qu'elles viennent du banc ou des fichiers Word.
+
+Les réglages communs — le dossier des fiches, le fichier de la liste — sont
+portés par des variables partagées entre les deux onglets : les saisir d'un côté
+les renseigne de l'autre. Les profils sont gérés ici, une seule fois, et chaque
+onglet se contente d'exposer ``lire_reglages`` / ``appliquer_reglages``.
+"""
 
 from __future__ import annotations
 
 import os
-import queue
 import sys
-import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 
-from . import __version__, config, runner, xlsxcell
+from . import __version__, config
+from .gui_banc import OngletBanc
+from .gui_excel import OngletExcel
+from .simulateur import SimulateurArp
 
-COULEURS = {
-    runner.ECRIT: "#0a7a28",
-    runner.SIMULATION: "#1a5fb4",
-    runner.DEJA_OK: "#5c5c5c",
-    runner.IGNORE: "#a35c00",
-    runner.ERREUR: "#c01c28",
-}
+NOM_DIAGNOSTIC = "ExtractionMAC-diagnostic.txt"
 
 
 class Application(ttk.Frame):
-    def __init__(self, racine):
-        super().__init__(racine, padding=12)
+    def __init__(self, racine, simulation=False):
+        super().__init__(racine, padding=10)
         self.racine = racine
         self.grid(row=0, column=0, sticky="nsew")
         racine.columnconfigure(0, weight=1)
         racine.rowconfigure(0, weight=1)
-        self.columnconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(2, weight=1)
 
         self.profils, dernier = config.charger()
-        self.messages = queue.Queue()
-        self.travail = None
-        self.arret = threading.Event()
+        self._reglages = config.profil_vide()
 
-        self.var_profil = tk.StringVar()
+        # partagées par les deux onglets : un même dossier, une même liste
         self.var_dossier = tk.StringVar()
-        self.var_feuille = tk.StringVar()
-        self.var_cellule = tk.StringVar()
-        self.var_sous_dossiers = tk.BooleanVar()
-        self.var_ecraser = tk.BooleanVar()
+        self.var_csv = tk.StringVar()
+        self.var_profil = tk.StringVar()
         self.var_etat = tk.StringVar(value="Prêt.")
 
-        self._construire()
+        self._construire(simulation)
         self._appliquer_profil(self.profils.get(dernier, config.profil_vide()))
         self.var_profil.set(dernier)
         self._rafraichir_profils()
-        self.var_etat.set("Configuration : %s" % config.chemin_config())
-        self.racine.after(100, self._vider_file)
+
+        depart = "Configuration : %s" % config.chemin_config()
+        if simulation:
+            depart = "Mode simulation : aucun appareil réel n'est lu.   " + depart
+        self.dire(depart)
         self.racine.protocol("WM_DELETE_WINDOW", self._fermer)
 
     # ------------------------------------------------------------------ vue
-    def _construire(self):
-        ligne = 0
-
-        ttk.Label(self, text="Profil").grid(row=ligne, column=0, sticky="w", pady=3)
+    def _construire(self, simulation):
         cadre_profil = ttk.Frame(self)
-        cadre_profil.grid(row=ligne, column=1, columnspan=2, sticky="ew", pady=3, padx=(8, 0))
-        cadre_profil.columnconfigure(0, weight=1)
+        cadre_profil.grid(row=0, column=0, sticky="ew")
+        cadre_profil.columnconfigure(1, weight=1)
+        ttk.Label(cadre_profil, text="Profil").grid(row=0, column=0, sticky="w")
         self.choix_profil = ttk.Combobox(cadre_profil, textvariable=self.var_profil, values=[])
-        self.choix_profil.grid(row=0, column=0, sticky="ew")
+        self.choix_profil.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         self.choix_profil.bind("<<ComboboxSelected>>", self._charger_profil)
         ttk.Button(cadre_profil, text="Enregistrer", width=12,
-                   command=self._enregistrer_profil).grid(row=0, column=1, padx=(6, 0))
+                   command=self._enregistrer_profil).grid(row=0, column=2, padx=(6, 0))
         ttk.Button(cadre_profil, text="Supprimer", width=11,
-                   command=self._supprimer_profil).grid(row=0, column=2, padx=(6, 0))
-        ligne += 1
+                   command=self._supprimer_profil).grid(row=0, column=3, padx=(6, 0))
 
-        ttk.Separator(self, orient="horizontal").grid(row=ligne, column=0, columnspan=3,
-                                                      sticky="ew", pady=8)
-        ligne += 1
+        ttk.Separator(self, orient="horizontal").grid(row=1, column=0, sticky="ew", pady=8)
 
-        ttk.Label(self, text="Dossier des fichiers").grid(row=ligne, column=0, sticky="w", pady=3)
-        ttk.Entry(self, textvariable=self.var_dossier).grid(row=ligne, column=1, sticky="ew",
-                                                            pady=3, padx=(8, 0))
-        ttk.Button(self, text="Parcourir...", width=13,
-                   command=self._choisir_dossier).grid(row=ligne, column=2, padx=(6, 0))
-        ligne += 1
+        self.onglets = ttk.Notebook(self)
+        self.onglets.grid(row=2, column=0, sticky="nsew")
+        self.onglet_banc = OngletBanc(self.onglets, self,
+                                      source=SimulateurArp() if simulation else None)
+        self.onglet_excel = OngletExcel(self.onglets, self)
+        self.onglets.add(self.onglet_banc, text="  Relevé au banc  ")
+        self.onglets.add(self.onglet_excel, text="  Écriture dans Excel  ")
 
-        ttk.Label(self, text="Feuille Excel").grid(row=ligne, column=0, sticky="w", pady=3)
-        self.choix_feuille = ttk.Combobox(self, textvariable=self.var_feuille, values=[])
-        self.choix_feuille.grid(row=ligne, column=1, sticky="ew", pady=3, padx=(8, 0))
-        ttk.Button(self, text="Lire les onglets", width=13,
-                   command=self._lire_onglets).grid(row=ligne, column=2, padx=(6, 0))
-        ligne += 1
+        ttk.Label(self, textvariable=self.var_etat, relief="sunken", anchor="w",
+                  padding=(6, 3)).grid(row=3, column=0, sticky="ew", pady=(8, 0))
 
-        ttk.Label(self, text="Cellule").grid(row=ligne, column=0, sticky="w", pady=3)
-        cadre_cellule = ttk.Frame(self)
-        cadre_cellule.grid(row=ligne, column=1, sticky="ew", pady=3, padx=(8, 0))
-        cadre_cellule.columnconfigure(1, weight=1)
-        ttk.Entry(cadre_cellule, textvariable=self.var_cellule, width=10).grid(row=0, column=0)
-        ttk.Label(cadre_cellule, text="  (exemple : F27)",
-                  foreground="#5c5c5c").grid(row=0, column=1, sticky="w")
-        ttk.Button(self, text="Trouver @MAC", width=13,
-                   command=self._trouver_libelles).grid(row=ligne, column=2, padx=(6, 0))
-        ligne += 1
+    # ------------------------------------------------- services aux onglets
+    def dire(self, message):
+        self.var_etat.set(message)
 
-        cadre_options = ttk.Frame(self)
-        cadre_options.grid(row=ligne, column=1, columnspan=2, sticky="w", pady=(6, 0), padx=(8, 0))
-        ttk.Checkbutton(cadre_options, text="Inclure les sous-dossiers",
-                        variable=self.var_sous_dossiers).grid(row=0, column=0, sticky="w")
-        ttk.Checkbutton(cadre_options, text="Écraser une valeur déjà présente",
-                        variable=self.var_ecraser).grid(row=0, column=1, sticky="w", padx=(16, 0))
-        ligne += 1
+    def reglages(self):
+        """Le profil courant complet : réglages des deux onglets et clés avancées."""
+        profil = dict(self._reglages)
+        profil["dossier"] = self.var_dossier.get().strip()
+        profil["fichier_csv"] = self.var_csv.get().strip()
+        profil.update(self.onglet_excel.lire_reglages())
+        profil.update(self.onglet_banc.lire_reglages())
+        return config.normaliser_profil(profil)
 
-        cadre_actions = ttk.Frame(self)
-        cadre_actions.grid(row=ligne, column=0, columnspan=3, sticky="ew", pady=(12, 6))
-        cadre_actions.columnconfigure(2, weight=1)
-        self.bouton_analyse = ttk.Button(cadre_actions, text="Analyser (sans écrire)",
-                                         command=lambda: self._lancer(True))
-        self.bouton_analyse.grid(row=0, column=0)
-        self.bouton_ecriture = ttk.Button(cadre_actions, text="Écrire dans Excel",
-                                          command=lambda: self._lancer(False))
-        self.bouton_ecriture.grid(row=0, column=1, padx=(8, 0))
-        self.bouton_arret = ttk.Button(cadre_actions, text="Arrêter",
-                                       command=self.arret.set, state="disabled")
-        self.bouton_arret.grid(row=0, column=2, sticky="w", padx=(8, 0))
-        ttk.Button(cadre_actions, text="Effacer le journal",
-                   command=self._effacer).grid(row=0, column=3, sticky="e")
-        ligne += 1
-
-        self.progression = ttk.Progressbar(self, mode="determinate")
-        self.progression.grid(row=ligne, column=0, columnspan=3, sticky="ew")
-        ligne += 1
-
-        cadre_journal = ttk.Frame(self)
-        cadre_journal.grid(row=ligne, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
-        cadre_journal.columnconfigure(0, weight=1)
-        cadre_journal.rowconfigure(0, weight=1)
-        self.rowconfigure(ligne, weight=1)
-        self.journal = tk.Text(cadre_journal, height=16, wrap="word", state="disabled")
-        self.journal.grid(row=0, column=0, sticky="nsew")
-        defilement = ttk.Scrollbar(cadre_journal, orient="vertical", command=self.journal.yview)
-        defilement.grid(row=0, column=1, sticky="ns")
-        self.journal.configure(yscrollcommand=defilement.set)
-        for statut, couleur in COULEURS.items():
-            self.journal.tag_configure(statut, foreground=couleur)
-        self.journal.tag_configure("titre", font=("TkDefaultFont", 9, "bold"))
-        ligne += 1
-
-        ttk.Label(self, textvariable=self.var_etat, foreground="#5c5c5c").grid(
-            row=ligne, column=0, columnspan=3, sticky="w", pady=(6, 0))
-
-    # -------------------------------------------------------------- journal
-    def _ecrire(self, texte, tag=None):
-        self.journal.configure(state="normal")
-        self.journal.insert("end", texte + "\n", tag or ())
-        self.journal.see("end")
-        self.journal.configure(state="disabled")
-
-    def _effacer(self):
-        self.journal.configure(state="normal")
-        self.journal.delete("1.0", "end")
-        self.journal.configure(state="disabled")
+    def basculer_vers_ecriture(self):
+        """Depuis l'onglet du banc : passer à l'écriture, source déjà choisie."""
+        self.onglet_excel.choisir_source_releve()
+        self.onglets.select(self.onglet_excel)
+        self.dire("Source réglée sur la liste relevée : vérifier la feuille et la cellule, "
+                  "puis « Analyser (sans écrire) ».")
 
     # --------------------------------------------------------------- profils
-    def _profil_courant(self):
-        return {
-            "dossier": self.var_dossier.get().strip(),
-            "feuille": self.var_feuille.get().strip(),
-            "cellule": self.var_cellule.get().strip(),
-            "sous_dossiers": self.var_sous_dossiers.get(),
-            "ecraser": self.var_ecraser.get(),
-        }
-
     def _appliquer_profil(self, profil):
         profil = config.normaliser_profil(profil)
-        self.var_dossier.set(profil["dossier"])
-        self.var_feuille.set(profil["feuille"])
-        self.var_cellule.set(profil["cellule"])
-        self.var_sous_dossiers.set(profil["sous_dossiers"])
-        self.var_ecraser.set(profil["ecraser"])
         self._reglages = profil
+        self.var_dossier.set(profil["dossier"])
+        self.var_csv.set(profil["fichier_csv"])
+        self.onglet_excel.appliquer_reglages(profil)
+        self.onglet_banc.appliquer_reglages(profil)
 
     def _rafraichir_profils(self):
         self.choix_profil.configure(values=sorted(self.profils))
@@ -181,8 +121,8 @@ class Application(ttk.Frame):
         if nom in self.profils:
             self._appliquer_profil(self.profils[nom])
             self.var_profil.set(nom)
-            self.var_etat.set("Profil « %s » chargé." % nom)
-            self._lire_onglets(silencieux=True)
+            self.dire("Profil « %s » chargé." % nom)
+            self.onglet_excel._lire_onglets(silencieux=True)
 
     def _enregistrer_profil(self):
         nom = self.var_profil.get().strip()
@@ -190,9 +130,7 @@ class Application(ttk.Frame):
             messagebox.showwarning("Profil", "Saisir un nom de profil avant d'enregistrer.",
                                    parent=self.racine)
             return
-        profil = dict(getattr(self, "_reglages", config.profil_vide()))
-        profil.update(self._profil_courant())
-        self.profils[nom] = config.normaliser_profil(profil)
+        self.profils[nom] = self.reglages()
         try:
             destination = config.enregistrer(self.profils, nom)
         except OSError as erreur:
@@ -200,7 +138,7 @@ class Application(ttk.Frame):
                                  parent=self.racine)
             return
         self._rafraichir_profils()
-        self.var_etat.set("Profil « %s » enregistré dans %s" % (nom, destination))
+        self.dire("Profil « %s » enregistré dans %s" % (nom, destination))
 
     def _supprimer_profil(self):
         nom = self.var_profil.get().strip()
@@ -218,185 +156,19 @@ class Application(ttk.Frame):
             return
         self.var_profil.set("")
         self._rafraichir_profils()
-        self.var_etat.set("Profil « %s » supprimé." % nom)
+        self.dire("Profil « %s » supprimé." % nom)
 
-    # ------------------------------------------------------------- assistance
-    def _choisir_dossier(self):
-        depart = self.var_dossier.get() if os.path.isdir(self.var_dossier.get()) else None
-        dossier = filedialog.askdirectory(title="Dossier contenant les .doc et les .xlsx",
-                                          initialdir=depart, parent=self.racine)
-        if dossier:
-            self.var_dossier.set(os.path.normpath(dossier))
-            self._lire_onglets(silencieux=True)
-
-    def _premier_classeur(self):
-        dossier = self.var_dossier.get().strip()
-        if not os.path.isdir(dossier):
-            return None
-        for chemin in runner._fichiers(dossier, self.var_sous_dossiers.get()):
-            nom = os.path.basename(chemin)
-            if runner._pertinent(nom) and nom.lower().endswith(runner.EXTENSIONS_EXCEL):
-                return chemin
-        return None
-
-    def _lire_onglets(self, silencieux=False):
-        classeur = self._premier_classeur()
-        if not classeur:
-            if not silencieux:
-                messagebox.showinfo("Onglets", "Aucun fichier .xlsx trouvé dans ce dossier.",
-                                    parent=self.racine)
-            return
-        try:
-            onglets = xlsxcell.lister_feuilles(classeur)
-        except (xlsxcell.ErreurExcel, OSError) as erreur:
-            if not silencieux:
-                messagebox.showerror("Onglets", str(erreur), parent=self.racine)
-            return
-        self.choix_feuille.configure(values=onglets)
-        if self.var_feuille.get().strip() not in onglets:
-            self.var_etat.set("Onglets lus dans %s : vérifier la feuille choisie."
-                              % os.path.basename(classeur))
-        else:
-            self.var_etat.set("Onglets lus dans %s." % os.path.basename(classeur))
-
-    def _trouver_libelles(self):
-        classeur = self._premier_classeur()
-        if not classeur:
-            messagebox.showinfo("Recherche", "Aucun fichier .xlsx trouvé dans ce dossier.",
-                                parent=self.racine)
-            return
-        try:
-            trouves = xlsxcell.trouver_libelles(classeur, "MAC")
-        except (xlsxcell.ErreurExcel, OSError) as erreur:
-            messagebox.showerror("Recherche", str(erreur), parent=self.racine)
-            return
-        self._ecrire("Libellés contenant « MAC » dans %s :" % os.path.basename(classeur), "titre")
-        if not trouves:
-            self._ecrire("  aucun libellé trouvé.", runner.IGNORE)
-            return
-        for feuille, cellule, texte in trouves:
-            self._ecrire("  %s!%s : %s" % (feuille, cellule, texte))
-        self._ecrire("  La MAC se met en général sur la même ligne, dans la colonne « N° Série ».",
-                     runner.DEJA_OK)
-
-    # -------------------------------------------------------------- execution
-    def _lancer(self, simulation):
-        if self.travail and self.travail.is_alive():
-            return
-        reglages = dict(getattr(self, "_reglages", config.profil_vide()))
-        reglages.update(self._profil_courant())
-        try:
-            options = runner.Options(
-                dossier=reglages["dossier"],
-                feuille=reglages["feuille"],
-                cellule=reglages["cellule"],
-                sous_dossiers=reglages["sous_dossiers"],
-                ecraser=reglages["ecraser"],
-                simulation=simulation,
-                separateur_mac=reglages["separateur_mac"],
-                mac_majuscules=reglages["mac_majuscules"],
-                groupes_numero=tuple(reglages["groupes_numero"]),
-            )
-            options.cellule = xlsxcell.normaliser_ref(options.cellule)
-            if not options.dossier or not os.path.isdir(options.dossier):
-                raise ValueError("dossier introuvable : %s" % (options.dossier or "(vide)"))
-            if not options.feuille.strip():
-                raise ValueError("le nom de la feuille Excel est obligatoire")
-        except (ValueError, xlsxcell.ErreurExcel) as erreur:
-            messagebox.showerror("Paramètres", str(erreur), parent=self.racine)
-            return
-
-        if not simulation:
-            paires, _ = runner.appairer(options)
-            if not paires:
-                messagebox.showinfo("Ecriture", "Aucune paire .doc / .xlsx à traiter dans ce dossier.",
-                                    parent=self.racine)
-                return
-            if not messagebox.askyesno(
-                    "Confirmation",
-                    "%d fichier(s) Excel vont être modifiés sur place,\n"
-                    "en %s!%s.\n\nContinuer ?" % (len(paires), options.feuille, options.cellule),
-                    parent=self.racine):
-                return
-
-        self._effacer()
-        self._ecrire("%s - %s!%s%s"
-                     % ("Analyse (aucune écriture)" if simulation else "Écriture",
-                        options.feuille, options.cellule,
-                        " - sous-dossiers inclus" if options.sous_dossiers else ""), "titre")
-        self._ecrire(options.dossier)
-        self._ecrire("")
-        self.arret.clear()
-        self.progression.configure(value=0, maximum=100)
-        self._basculer(False)
-        self.travail = threading.Thread(target=self._executer, args=(options,), daemon=True)
-        self.travail.start()
-
-    def _executer(self, options):
-        def progression(fait, total, resultat):
-            self.messages.put(("avance", (fait, total, resultat)))
-        try:
-            bilan = runner.executer(options, progression, self.arret.is_set)
-        except Exception as erreur:                       # noqa: BLE001 - remonte a l'interface
-            self.messages.put(("echec", str(erreur)))
-            return
-        self.messages.put(("fin", bilan))
-
-    def _vider_file(self):
-        try:
-            while True:
-                genre, charge = self.messages.get_nowait()
-                if genre == "avance":
-                    fait, total, resultat = charge
-                    self.progression.configure(maximum=max(total, 1), value=fait)
-                    self._afficher(resultat)
-                elif genre == "fin":
-                    self._terminer(charge)
-                elif genre == "echec":
-                    self._basculer(True)
-                    messagebox.showerror("Erreur", charge, parent=self.racine)
-                    self.var_etat.set("Échec : %s" % charge)
-        except queue.Empty:
-            pass
-        self.racine.after(100, self._vider_file)
-
-    def _afficher(self, resultat):
-        cible = os.path.basename(resultat.excel or resultat.word or "")
-        self._ecrire("[%-9s] %-22s %s" % (resultat.libelle, resultat.numero or "-", cible),
-                     resultat.statut)
-        self._ecrire("             %s" % resultat.message, resultat.statut)
-
-    def _terminer(self, bilan):
-        anomalies = [r for r in bilan.resultats if r.statut in (runner.ERREUR, runner.IGNORE)
-                     and not r.mac]
-        if anomalies:
-            self._ecrire("")
-            self._ecrire("Fichiers non traités :", "titre")
-            for resultat in anomalies:
-                self._afficher(resultat)
-        self._ecrire("")
-        self._ecrire("Bilan : %s" % bilan.resume(), "titre")
-        self.var_etat.set("Terminé - %s" % bilan.resume())
-        self.progression.configure(value=self.progression["maximum"])
-        self._basculer(True)
-
-    def _basculer(self, actif):
-        etat = "normal" if actif else "disabled"
-        self.bouton_analyse.configure(state=etat)
-        self.bouton_ecriture.configure(state=etat)
-        self.bouton_arret.configure(state="disabled" if actif else "normal")
-
+    # ------------------------------------------------------------- fermeture
     def _fermer(self):
-        if self.travail and self.travail.is_alive():
-            if not messagebox.askyesno("Quitter", "Un traitement est en cours. Quitter quand même ?",
-                                       parent=self.racine):
+        for onglet in (self.onglet_excel, self.onglet_banc):
+            if not onglet.fermer():
                 return
-            self.arret.set()
         self.racine.destroy()
 
 
-NOM_DIAGNOSTIC = "ExtractionMAC-diagnostic.txt"
-
+# --------------------------------------------------------------------------
+# points d'entree
+# --------------------------------------------------------------------------
 
 def diagnostic():
     """Ecrit les emplacements resolus dans un fichier, a cote de la configuration.
@@ -427,20 +199,24 @@ def diagnostic():
 
 def principal(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
-    if any(argument.lstrip("-/").lower() == "diagnostic" for argument in argv):
+    options = {a.lstrip("-/").lower() for a in argv}
+    if "diagnostic" in options:
         diagnostic()
         return 0
-    lancer()
+    lancer(simulation="simulation" in options)
     return 0
 
 
-def lancer():
+def lancer(simulation=False):
     racine = tk.Tk()
-    racine.title("Extraction MAC - Word vers Excel  v%s" % __version__)
-    racine.minsize(760, 620)
+    titre = "Extraction MAC - relevé au banc et écriture dans Excel  v%s" % __version__
+    if simulation:
+        titre += "   [SIMULATION]"
+    racine.title(titre)
+    racine.minsize(880, 780)
     try:
         racine.call("ttk::style", "theme", "use", "vista")
     except tk.TclError:
         pass
-    Application(racine)
+    Application(racine, simulation=simulation)
     racine.mainloop()

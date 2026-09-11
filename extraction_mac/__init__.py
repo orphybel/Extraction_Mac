@@ -1,3 +1,3 @@
-"""Extraction MAC : reporte l'adresse MAC d'un fichier Word dans la fiche de test Excel correspondante."""
+"""Extraction MAC : relever les adresses MAC au banc, et les porter dans les fiches de test Excel."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

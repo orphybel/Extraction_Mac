@@ -11,3 +11,4 @@ dist/
 .venv/
 ExtractionMAC-config.json
 ExtractionMAC-diagnostic.txt
+MAC-releves.csv
